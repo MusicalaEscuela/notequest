@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>NoteQuest 🎵</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:'Press Start 2P',monospace; cursor:none; }
+
+#renderer-canvas { position:fixed; top:0; left:0; width:100%; height:100%; image-rendering:pixelated; }
+
+/* ── HUD ── */
+#hud {
+  position:fixed; top:0; left:0; right:0; padding:14px 18px;
+  pointer-events:none; z-index:10;
+}
+#level-display { color:#FFD700; font-size:8px; text-shadow:2px 2px 0 #000; }
+#objective { color:#fff; font-size:6px; margin-top:7px; text-shadow:1px 1px 0 #000; opacity:.85; }
+
+/* ── Crosshair ── */
+#crosshair {
+  position:fixed; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  color:#fff; font-size:22px; line-height:1;
+  text-shadow:0 0 3px #000;
+  pointer-events:none; user-select:none; z-index:10;
+}
+
+/* ── Break progress ── */
+#break-wrap {
+  position:fixed; bottom:88px; left:50%; transform:translateX(-50%);
+  display:none; flex-direction:column; align-items:center; gap:4px; z-index:10;
+}
+#break-label { color:#fff; font-size:5px; text-shadow:1px 1px 0 #000; }
+#break-track {
+  width:130px; height:9px; background:rgba(0,0,0,.55);
+  border:2px solid #777;
+}
+#break-bar { height:100%; background:#FFD700; width:0%; }
+
+/* ── Interact prompt ── */
+#interact-prompt {
+  position:fixed; bottom:110px; left:50%; transform:translateX(-50%);
+  color:#fff; font-size:7px; background:rgba(0,0,0,.6);
+  border:2px solid #8B6914; padding:7px 13px;
+  display:none; z-index:10; white-space:nowrap;
+}
+
+/* ── Inventory ── */
+#inventory {
+  position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+  display:flex; gap:5px; z-index:10; pointer-events:none;
+}
+.inv-slot {
+  width:50px; height:50px; border:3px solid #444;
+  background:rgba(0,0,0,.65);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+}
+.inv-slot.filled { border-color:#aaa; }
+.inv-slot .note-label { font-size:5px; color:#fff; margin-top:1px; }
+
+/* ── Altar Overlay ── */
+#altar-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.88); z-index:100;
+  align-items:center; justify-content:center;
+}
+#altar-overlay.active { display:flex; }
+#altar-panel {
+  background:#111; border:4px solid #8B6914;
+  padding:24px 28px; max-width:520px; width:92%; text-align:center;
+  box-shadow:0 0 40px rgba(255,215,0,.2);
+}
+#altar-panel h2 { color:#FFD700; font-size:10px; margin-bottom:18px; letter-spacing:2px; }
+
+.altar-label { color:#888; font-size:6px; margin:10px 0 6px; text-transform:uppercase; letter-spacing:1px; }
+
+.melody-row { display:flex; gap:7px; justify-content:center; flex-wrap:wrap; margin:4px 0; }
+
+.note-chip {
+  width:42px; height:42px; border-radius:3px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:9px; font-family:'Press Start 2P',monospace; color:#fff;
+  border:2px solid rgba(255,255,255,.25);
+  text-shadow:1px 1px 0 #000;
+  transition:transform .1s;
+}
+.note-chip.empty { background:#222; border-color:#444; color:#555; }
+.note-chip.deposited { border-color:rgba(255,255,255,.6); }
+.note-chip.correct { box-shadow:0 0 10px rgba(0,255,100,.9); border-color:#0f0; }
+.note-chip.wrong { box-shadow:0 0 10px rgba(255,50,50,.9); border-color:#f44; animation:shake .3s; }
+@keyframes shake { 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+
+.collected-chip {
+  width:46px; height:46px; border-radius:3px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:10px; font-family:'Press Start 2P',monospace; color:#fff;
+  cursor:pointer; border:3px solid rgba(255,255,255,.35);
+  text-shadow:1px 1px 0 #000; transition:transform .08s, opacity .15s;
+}
+.collected-chip:hover { transform:scale(1.12); }
+.collected-chip:active { transform:scale(.95); }
+.collected-chip.used { opacity:.25; pointer-events:none; }
+
+#altar-message { font-size:8px; min-height:22px; margin:10px 0; }
+
+.altar-btn-row { display:flex; gap:8px; justify-content:center; margin-top:14px; flex-wrap:wrap; }
+.altar-btn {
+  background:#333; color:#fff; border:2px solid #666;
+  padding:8px 14px; font-family:'Press Start 2P',monospace;
+  font-size:6px; cursor:pointer; letter-spacing:.5px;
+}
+.altar-btn:hover { background:#555; }
+.altar-btn.green { background:#1a5c2a; border-color:#2a8; }
+.altar-btn.green:hover { background:#2a7a3a; }
+.altar-btn.red { background:#5c1a1a; border-color:#a44; }
+.altar-btn.red:hover { background:#7a2a2a; }
+
+/* ── Start Screen ── */
+#start-screen {
+  position:fixed; inset:0; z-index:200;
+  background:radial-gradient(ellipse at center, #1a2a3a 0%, #0a0a0a 100%);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px;
+}
+#start-screen h1 {
+  color:#FFD700; font-size:clamp(12px,3vw,20px);
+  text-shadow:4px 4px 0 #8B4914, 0 0 30px rgba(255,215,0,.4);
+  text-align:center; line-height:1.6;
+}
+.controls-box {
+  border:2px solid #333; padding:16px 24px; background:rgba(255,255,255,.03);
+}
+.controls-box p { color:#aaa; font-size:6px; line-height:2.4; text-align:center; }
+.controls-box span { color:#FFD700; }
+#start-btn {
+  background:#1a6a2a; color:#fff; border:none;
+  padding:14px 32px; font-family:'Press Start 2P',monospace;
+  font-size:10px; cursor:pointer;
+  text-shadow:2px 2px 0 #000;
+  box-shadow:0 4px 0 #0a4a1a, 0 0 20px rgba(0,200,80,.3);
+  letter-spacing:2px; transition:all .1s;
+}
+#start-btn:hover { background:#2a8a3a; box-shadow:0 4px 0 #0a6a2a, 0 0 30px rgba(0,230,80,.5); }
+#start-btn:active { transform:translateY(3px); box-shadow:0 1px 0 #0a4a1a; }
+
+/* ── Level Transition ── */
+#level-transition {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.92); z-index:150;
+  flex-direction:column; align-items:center; justify-content:center; gap:18px;
+}
+#level-transition.active { display:flex; }
+#lt-title { color:#FFD700; font-size:clamp(10px,2.5vw,16px); text-shadow:3px 3px 0 #000; }
+#lt-desc { color:#ccc; font-size:7px; text-align:center; }
+#lt-hint { color:#888; font-size:5px; }
+
+/* ── Win Screen ── */
+#win-screen {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,15,0,.96); z-index:200;
+  flex-direction:column; align-items:center; justify-content:center; gap:20px;
+}
+#win-screen.active { display:flex; }
+#win-screen h1 {
+  color:#7FFF00; font-size:clamp(10px,2.5vw,16px);
+  text-shadow:3px 3px 0 #000, 0 0 40px rgba(100,255,50,.5);
+  text-align:center; line-height:1.6;
+}
+
+/* ── Notification ── */
+#notif {
+  position:fixed; top:60px; left:50%; transform:translateX(-50%);
+  color:#fff; font-size:7px; background:rgba(0,0,0,.75);
+  border:2px solid #FFD700; padding:8px 16px;
+  z-index:20; pointer-events:none;
+  opacity:0; transition:opacity .3s;
+}
+#notif.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<!-- ──────────── START SCREEN ──────────── -->
+<div id="start-screen">
+  <h1>🎵 NOTE QUEST 🎵</h1>
+  <div class="controls-box">
+    <p>
+      <span>WASD</span> — Moverse &nbsp;|&nbsp; <span>Mouse</span> — Mirar<br>
+      <span>Click+Hold</span> — Romper bloque &nbsp;|&nbsp; <span>Espacio</span> — Saltar<br>
+      <span>E</span> — Abrir Altar Musical<br><br>
+      Explora el mundo, rompe bloques para<br>
+      encontrar notas escondidas y llévalas<br>
+      al Altar para recrear la melodía secreta.
+    </p>
+  </div>
+  <button id="start-btn">▶ INICIAR</button>
+</div>
+
+<!-- ──────────── HUD ──────────── -->
+<div id="hud">
+  <div id="level-display">NIVEL 1</div>
+  <div id="objective">Encuentra las notas y llévalas al Altar</div>
+</div>
+<div id="crosshair">+</div>
+<div id="inventory"></div>
+<div id="break-wrap">
+  <div id="break-label">ROMPIENDO...</div>
+  <div id="break-track"><div id="break-bar"></div></div>
+</div>
+<div id="interact-prompt">[ E ] Abrir Altar Musical</div>
+<div id="notif" id="notif"></div>
+
+<!-- ──────────── ALTAR OVERLAY ──────────── -->
+<div id="altar-overlay">
+  <div id="altar-panel">
+    <h2>⚗ ALTAR MUSICAL ⚗</h2>
+
+    <div class="altar-label">Melodía objetivo (escúchala)</div>
+    <div class="melody-row" id="target-slots"></div>
+
+    <div class="altar-label">Tu secuencia</div>
+    <div class="melody-row" id="deposit-slots"></div>
+
+    <div id="altar-message"></div>
+
+    <div class="altar-label">Notas recolectadas — haz clic para depositar</div>
+    <div class="melody-row" id="collected-notes"></div>
+
+    <div class="altar-btn-row">
+      <button class="altar-btn green" id="btn-play-melody">▶ Escuchar melodía</button>
+      <button class="altar-btn red"   id="btn-clear">✕ Limpiar</button>
+      <button class="altar-btn"       id="btn-close">ESC Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────── LEVEL TRANSITION ──────────── -->
+<div id="level-transition">
+  <div id="lt-title">NIVEL 1</div>
+  <div id="lt-desc">Descripción</div>
+  <div class="melody-row" id="lt-preview"></div>
+  <div id="lt-hint">↑ Escucha la melodía objetivo</div>
+</div>
+
+<!-- ──────────── WIN SCREEN ──────────── -->
+<div id="win-screen">
+  <h1>🎉 ¡MAESTRO DE MELODÍAS!</h1>
+  <p style="color:#aff;font-size:7px;text-align:center">Completaste todos los niveles</p>
+  <button onclick="location.reload()" style="background:#1a6a2a;color:#fff;border:none;padding:14px 28px;font-family:'Press Start 2P',monospace;font-size:9px;cursor:pointer;letter-spacing:1px;">↺ JUGAR DE NUEVO</button>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  NOTE QUEST — Minecraft Musical
+// ══════════════════════════════════════════════════════
+
+// ── CONSTANTS ──
+const NOTE_FREQS = { C:261.63, D:293.66, E:329.63, F:349.23, G:392.00, A:440.00, B:493.88 };
+const NOTE_COLORS = { C:'#e74c3c', D:'#e67e22', E:'#d4ac0d', F:'#27ae60', G:'#2980b9', A:'#8e44ad', B:'#c0392b' };
+const NOTE_EMOJIS = { C:'🔴', D:'🟠', E:'🟡', F:'🟢', G:'🔵', A:'🟣', B:'♦️' };
+
+const LEVELS = [
+  { name:'Bosque de los Sones',    melody:['C','E','G'],         desc:'3 notas escondidas entre los árboles' },
+  { name:'Las Minas Resonantes',   melody:['C','D','E','G'],     desc:'4 notas entre la piedra oscura' },
+  { name:'La Caverna del Eco',     melody:['E','D','C','D','E'], desc:'5 notas profundas, ¡ojo con el orden!' },
+  { name:'La Cumbre Musical',      melody:['C','E','G','E','C','G'], desc:'6 notas dispersas en las alturas' },
+];
+
+const WORLD_W = 24, WORLD_D = 24;
+const BREAK_FRAMES = 55;
+const PLAYER_REACH = 4.2;
+const PLAYER_SPEED = 0.075;
+const ALTAR_X = 11, ALTAR_Z = 11;
+
+// ── GAME STATE ──
+const S = {
+  level: 0,
+  collected: [],
+  deposited: [],
+  altarOpen: false,
+  started: false,
+};
+
+// ── AUDIO ──
+let actx;
+function initAudio() { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+
+function playNote(name, dur=0.65, vol=0.38, delay=0) {
+  if (!actx) return;
+  const freq = NOTE_FREQS[name];
+  const t = actx.currentTime + delay;
+  const osc = actx.createOscillator();
+  const env = actx.createGain();
+  const vib = actx.createOscillator();
+  const vibG = actx.createGain();
+  vib.frequency.value = 5; vibG.gain.value = 4;
+  vib.connect(vibG); vibG.connect(osc.frequency);
+  osc.connect(env); env.connect(actx.destination);
+  osc.type = 'sine'; osc.frequency.value = freq;
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(vol, t + 0.04);
+  env.gain.setValueAtTime(vol, t + dur * .55);
+  env.gain.exponentialRampToValueAtTime(.001, t + dur);
+  vib.start(t); osc.start(t); vib.stop(t+dur); osc.stop(t+dur);
+}
+
+function playMelody(notes, gap=0.58) { notes.forEach((n,i) => playNote(n,.5,.3,i*gap)); }
+
+function sfx(type) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.connect(g); g.connect(actx.destination);
+  const t = actx.currentTime;
+  if (type === 'break') {
+    o.type='sawtooth'; o.frequency.setValueAtTime(200,t);
+    o.frequency.exponentialRampToValueAtTime(40,t+.18);
+    g.gain.setValueAtTime(.18,t); g.gain.exponentialRampToValueAtTime(.001,t+.18);
+    o.start(); o.stop(t+.18);
+  } else if (type === 'collect') {
+    o.type='sine'; o.frequency.setValueAtTime(700,t);
+    o.frequency.exponentialRampToValueAtTime(1400,t+.12);
+    g.gain.setValueAtTime(.2,t); g.gain.exponentialRampToValueAtTime(.001,t+.22);
+    o.start(); o.stop(t+.22);
+  } else if (type === 'success') {
+    ['C','E','G','C'].forEach((n,i) => playNote(n,.4,.5,i*.28));
+  } else if (type === 'fail') {
+    o.type='sawtooth'; o.frequency.value=100;
+    g.gain.setValueAtTime(.25,t); g.gain.exponentialRampToValueAtTime(.001,t+.5);
+    o.start(); o.stop(t+.5);
+  }
+}
+
+// ── THREE.JS SETUP ──
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 18, 42);
+
+const cam = new THREE.PerspectiveCamera(72, innerWidth/innerHeight, 0.06, 200);
+const renderer = new THREE.WebGLRenderer({ antialias:false });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+renderer.domElement.id = 'renderer-canvas';
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, .65));
+const sun = new THREE.DirectionalLight(0xfff3cc, 1.05);
+sun.position.set(1, 2.5, 1); scene.add(sun);
+
+// ── BLOCK SYSTEM ──
+const blockMeshes = {};   // "x,y,z" → Mesh
+const blockData   = {};   // "x,y,z" → { breakable, hasNote, noteValue }
+
+const MAT = {
+  grass_top:  new THREE.MeshLambertMaterial({ color:0x5d9e3b }),
+  grass_side: new THREE.MeshLambertMaterial({ color:0x886633 }),
+  dirt:       new THREE.MeshLambertMaterial({ color:0x7a5c3a }),
+  stone:      new THREE.MeshLambertMaterial({ color:0x888 }),
+  wood:       new THREE.MeshLambertMaterial({ color:0x8B6914 }),
+  leaves:     new THREE.MeshLambertMaterial({ color:0x2d7a1f }),
+  altar:      new THREE.MeshLambertMaterial({ color:0xDAA520 }),
+  bedrock:    new THREE.MeshLambertMaterial({ color:0x333 }),
+};
+const GEO = new THREE.BoxGeometry(1,1,1);
+const GEO_SMALL = new THREE.BoxGeometry(.28,.28,.28);
+const GEO_NOTE  = new THREE.OctahedronGeometry(.24, 0);
+
+function noteMat(noteName) {
+  return new THREE.MeshLambertMaterial({
+    color: new THREE.Color(NOTE_COLORS[noteName]),
+    emissive: new THREE.Color(NOTE_COLORS[noteName]),
+    emissiveIntensity: .55
+  });
+}
+
+function placeBlock(x,y,z, type, breakable=false, hasNote=false, noteValue=null) {
+  const key = `${x},${y},${z}`;
+  let mesh;
+  if (type==='grass') {
+    mesh = new THREE.Mesh(GEO, [MAT.grass_side,MAT.grass_side,MAT.grass_top,MAT.grass_side,MAT.grass_side,MAT.grass_side]);
+  } else if (type==='noteblock' && noteValue) {
+    const m = new THREE.MeshLambertMaterial({
+      color: new THREE.Color(NOTE_COLORS[noteValue]).multiplyScalar(.4).addScalar(.1) ,
+      emissive: new THREE.Color(NOTE_COLORS[noteValue]),
+      emissiveIntensity: .35
+    });
+    mesh = new THREE.Mesh(GEO, m);
+  } else {
+    mesh = new THREE.Mesh(GEO, MAT[type] || MAT.stone);
+  }
+  mesh.position.set(x+.5, y+.5, z+.5);
+  scene.add(mesh);
+  blockMeshes[key] = mesh;
+  blockData[key] = { type, breakable, hasNote, noteValue };
+}
+
+function removeBlock(x,y,z) {
+  const key = `${x},${y},${z}`;
+  if (blockMeshes[key]) {
+    scene.remove(blockMeshes[key]);
+    // Dispose dynamic materials (note blocks)
+    if (!Array.isArray(blockMeshes[key].material)) {
+      const m = blockMeshes[key].material;
+      if (Object.values(MAT).indexOf(m) === -1) m.dispose();
+    }
+    delete blockMeshes[key];
+    delete blockData[key];
+  }
+}
+
+function getBlock(x,y,z) { return blockData[`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`]; }
+function hasBlock(x,y,z) { return !!getBlock(x,y,z); }
+
+// ── HIGHLIGHT OVERLAY ──
+const hlMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.02,1.02,1.02),
+  new THREE.MeshBasicMaterial({ color:0xffffff, wireframe:true, transparent:true, opacity:.45 })
+);
+hlMesh.visible = false;
+scene.add(hlMesh);
+
+// ── FLOATING NOTES ──
+let worldNotes = []; // { mesh, noteValue, wx, wy, wz, phase }
+
+function spawnNote(x,y,z, name) {
+  const mesh = new THREE.Mesh(GEO_NOTE, noteMat(name));
+  mesh.position.set(x+.5, y+.9, z+.5);
+  scene.add(mesh);
+  worldNotes.push({ mesh, noteValue:name, wx:x+.5, wy:y+.9, wz:z+.5, phase:Math.random()*Math.PI*2 });
+}
+
+// ── ALTAR STRUCTURE ──
+let beaconMesh = null;
+
+function buildAltar(ax,az) {
+  for (let dx=-1;dx<=1;dx++) for (let dz=-1;dz<=1;dz++)
+    placeBlock(ax+dx, 0, az+dz, 'altar');
+  [[ax-1,az-1],[ax+1,az-1],[ax-1,az+1],[ax+1,az+1]].forEach(([x,z]) => {
+    placeBlock(x,1,z,'altar'); placeBlock(x,2,z,'altar');
+  });
+  const bm = new THREE.Mesh(
+    new THREE.BoxGeometry(.55,.55,.55),
+    new THREE.MeshLambertMaterial({ color:0xffff99, emissive:0xffee00, emissiveIntensity:1 })
+  );
+  bm.position.set(ax+.5, 3.5, az+.5);
+  scene.add(bm);
+  beaconMesh = bm;
+  const light = new THREE.PointLight(0xffff66, 2.2, 10);
+  light.position.copy(bm.position);
+  scene.add(light);
+}
+
+// ── WORLD GENERATION ──
+function generateWorld(lvl) {
+  // Remove breakable blocks + world notes
+  Object.keys(blockData).filter(k => blockData[k].breakable).forEach(k => {
+    const [x,y,z] = k.split(',').map(Number); removeBlock(x,y,z);
+  });
+  worldNotes.forEach(n => { scene.remove(n.mesh); n.mesh.geometry.dispose(); n.mesh.material.dispose(); });
+  worldNotes = [];
+
+  // Ground
+  for (let x=0;x<WORLD_W;x++) for (let z=0;z<WORLD_D;z++)
+    if (!blockData[`${x},0,${z}`]) placeBlock(x,0,z,'grass');
+
+  const level = LEVELS[lvl];
+
+  // Place note blocks first (hidden as special blocks)
+  const notePositions = [];
+  const mNotes = [...level.melody];
+  while (mNotes.length > 0) {
+    const nx = 2 + Math.floor(Math.random()*(WORLD_W-4));
+    const nz = 2 + Math.floor(Math.random()*(WORLD_D-4));
+    if (Math.abs(nx-ALTAR_X)<5 && Math.abs(nz-ALTAR_Z)<5) continue;
+    if (notePositions.some(p=>p.x===nx&&p.z===nz)) continue;
+    const n = mNotes.shift();
+    notePositions.push({x:nx,z:nz,note:n});
+    placeBlock(nx,1,nz,'noteblock',true,true,n);
+  }
+
+  // Trees
+  for (let i=0;i<10+lvl*2;i++) {
+    const tx=2+Math.floor(Math.random()*(WORLD_W-4)), tz=2+Math.floor(Math.random()*(WORLD_D-4));
+    if (Math.abs(tx-ALTAR_X)<5&&Math.abs(tz-ALTAR_Z)<5) continue;
+    if (notePositions.some(p=>p.x===tx&&p.z===tz)) continue;
+    if (blockData[`${tx},1,${tz}`]) continue;
+    placeBlock(tx,1,tz,'wood',true); placeBlock(tx,2,tz,'wood',true); placeBlock(tx,3,tz,'wood',true);
+    for (let lx=-1;lx<=1;lx++) for (let lz=-1;lz<=1;lz++) {
+      if (lx===0&&lz===0) continue;
+      placeBlock(tx+lx,3,tz+lz,'leaves',true); placeBlock(tx+lx,4,tz+lz,'leaves',true);
+    }
+    placeBlock(tx,4,tz,'leaves',true);
+  }
+
+  // Stone clusters
+  for (let i=0;i<14+lvl*3;i++) {
+    const sx=2+Math.floor(Math.random()*(WORLD_W-4)), sz=2+Math.floor(Math.random()*(WORLD_D-4));
+    if (Math.abs(sx-ALTAR_X)<5&&Math.abs(sz-ALTAR_Z)<5) continue;
+    if (blockData[`${sx},1,${sz}`]) continue;
+    const h=1+Math.floor(Math.random()*2);
+    for (let sy=1;sy<=h;sy++) placeBlock(sx,sy,sz,'stone',true);
+  }
+}
+
+// ── PLAYER ──
+const P = { x:2.5, y:1.7, z:2.5, velY:0, yaw:0, pitch:0, onGround:false };
+
+function updateCam() {
+  cam.position.set(P.x, P.y, P.z);
+  cam.rotation.order = 'YXZ';
+  cam.rotation.y = P.yaw;
+  cam.rotation.x = P.pitch;
+}
+
+// ── INPUT ──
+const KEYS = {};
+document.addEventListener('keydown', e => {
+  KEYS[e.code] = true;
+  if (e.code==='Space' && P.onGround && !S.altarOpen) {
+    P.velY = .115; P.onGround = false;
+  }
+  if (e.code==='KeyE' && !S.altarOpen && S.started) {
+    const d = Math.hypot(P.x-ALTAR_X-.5, P.z-ALTAR_Z-.5);
+    if (d < 4.5) openAltar();
+  }
+  if (e.code==='Escape' && S.altarOpen) closeAltar();
+});
+document.addEventListener('keyup', e => KEYS[e.code] = false);
+
+let mouseHeld = false, breakKey = null, breakTimer = 0;
+document.addEventListener('mousedown', e => { if (e.button===0 && document.pointerLockElement && !S.altarOpen) mouseHeld=true; });
+document.addEventListener('mouseup',   e => { if (e.button===0) { mouseHeld=false; breakTimer=0; breakKey=null; hideBreakBar(); } });
+document.addEventListener('mousemove', e => {
+  if (!document.pointerLockElement || S.altarOpen) return;
+  P.yaw   -= e.movementX * .002;
+  P.pitch -= e.movementY * .002;
+  P.pitch  = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, P.pitch));
+});
+
+renderer.domElement.addEventListener('click', () => {
+  if (!document.pointerLockElement && S.started) renderer.domElement.requestPointerLock();
+});
+
+// ── COLLISION ──
+const M = .3;
+function movePlayer(dx,dz) {
+  const nx=P.x+dx, nz=P.z+dz;
+  const fy=P.y-1.58;
+  if (!hasBlock(nx-M,fy,P.z)&&!hasBlock(nx+M,fy,P.z)&&!hasBlock(nx-M,P.y-.2,P.z)&&!hasBlock(nx+M,P.y-.2,P.z))
+    P.x=Math.max(.5,Math.min(WORLD_W-.5,nx));
+  if (!hasBlock(P.x,fy,nz-M)&&!hasBlock(P.x,fy,nz+M)&&!hasBlock(P.x,P.y-.2,nz-M)&&!hasBlock(P.x,P.y-.2,nz+M))
+    P.z=Math.max(.5,Math.min(WORLD_D-.5,nz));
+}
+
+// ── RAYCASTING ──
+const ray = new THREE.Raycaster();
+function getHit() {
+  ray.setFromCamera({x:0,y:0}, cam);
+  const hits = ray.intersectObjects(Object.values(blockMeshes));
+  return (hits.length && hits[0].distance < PLAYER_REACH) ? hits[0] : null;
+}
+
+function hideBreakBar() {
+  document.getElementById('break-wrap').style.display='none';
+  document.getElementById('break-bar').style.width='0%';
+}
+
+// ── NOTIFICATIONS ──
+let notifTimer;
+function notify(msg) {
+  const el = document.getElementById('notif');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── INVENTORY UI ──
+function updateInventoryUI() {
+  const inv = document.getElementById('inventory');
+  const total = LEVELS[S.level].melody.length;
+  inv.innerHTML = '';
+  for (let i=0;i<total;i++) {
+    const s = document.createElement('div');
+    const n = S.collected[i];
+    s.className = 'inv-slot' + (n?' filled':'');
+    if (n) {
+      s.style.background = NOTE_COLORS[n]+'44';
+      s.style.borderColor = NOTE_COLORS[n];
+      s.innerHTML = `<span style="font-size:18px">${NOTE_EMOJIS[n]}</span><span class="note-label">${n}</span>`;
+    } else {
+      s.innerHTML = '<span style="color:#444;font-size:13px">?</span>';
+    }
+    inv.appendChild(s);
+  }
+}
+
+// ── ALTAR UI ──
+function openAltar() {
+  S.altarOpen = true;
+  document.exitPointerLock();
+  document.getElementById('altar-overlay').classList.add('active');
+  renderAltar();
+}
+function closeAltar() {
+  S.altarOpen = false;
+  document.getElementById('altar-overlay').classList.remove('active');
+  renderer.domElement.requestPointerLock();
+}
+
+function renderAltar() {
+  const level = LEVELS[S.level];
+
+  // Target
+  const tEl = document.getElementById('target-slots');
+  tEl.innerHTML = '';
+  level.melody.forEach(n => {
+    const c = document.createElement('div');
+    c.className='note-chip'; c.style.background=NOTE_COLORS[n]; c.textContent=n;
+    tEl.appendChild(c);
+  });
+
+  // Deposited slots
+  const dEl = document.getElementById('deposit-slots');
+  dEl.innerHTML = '';
+  for (let i=0;i<level.melody.length;i++) {
+    const c = document.createElement('div');
+    if (S.deposited[i]) {
+      c.className='note-chip deposited';
+      c.style.background=NOTE_COLORS[S.deposited[i]];
+      c.textContent=S.deposited[i];
+    } else {
+      c.className='note-chip empty'; c.textContent='?';
+    }
+    dEl.appendChild(c);
+  }
+
+  // Available collected notes
+  const cEl = document.getElementById('collected-notes');
+  cEl.innerHTML = '';
+  const usedCounts = {};
+  S.deposited.forEach(n => usedCounts[n]=(usedCounts[n]||0)+1);
+  const availCounts = {};
+  S.collected.forEach(n => availCounts[n]=(availCounts[n]||0)+1);
+
+  const shownNotes = [...new Set(S.collected)];
+  if (shownNotes.length === 0) {
+    cEl.innerHTML='<span style="color:#555;font-size:6px">Aún no tienes notas</span>';
+  } else {
+    shownNotes.forEach(n => {
+      const have = availCounts[n]||0;
+      const used = usedCounts[n]||0;
+      const chip = document.createElement('div');
+      chip.className='collected-chip';
+      chip.style.background = NOTE_COLORS[n];
+      chip.textContent = n;
+      chip.dataset.note = n;
+      if (used >= have) chip.classList.add('used');
+      else chip.addEventListener('click', ()=>depositNote(n));
+      cEl.appendChild(chip);
+    });
+  }
+
+  document.getElementById('altar-message').textContent='';
+}
+
+function depositNote(name) {
+  const level = LEVELS[S.level];
+  if (S.deposited.length >= level.melody.length) return;
+  const usedCount = S.deposited.filter(n=>n===name).length;
+  const haveCount = S.collected.filter(n=>n===name).length;
+  if (usedCount >= haveCount) return;
+
+  S.deposited.push(name);
+  playNote(name, .5, .4);
+  renderAltar();
+
+  if (S.deposited.length === level.melody.length) {
+    setTimeout(checkMelody, 450);
+  }
+}
+
+function checkMelody() {
+  const target = LEVELS[S.level].melody;
+  const ok = target.every((n,i)=>n===S.deposited[i]);
+  const chips = document.getElementById('deposit-slots').querySelectorAll('.note-chip');
+  if (ok) {
+    chips.forEach(c=>c.classList.add('correct'));
+    document.getElementById('altar-message').innerHTML='<span style="color:#7FFF00;font-size:9px">✓ ¡MELODÍA CORRECTA!</span>';
+    sfx('success');
+    setTimeout(()=>{ closeAltar(); nextLevel(); }, 2000);
+  } else {
+    chips.forEach((c,i)=>{ if(S.deposited[i]!==target[i]) c.classList.add('wrong'); });
+    document.getElementById('altar-message').innerHTML='<span style="color:#ff4444;font-size:8px">✗ Secuencia incorrecta. Inténtalo de nuevo.</span>';
+    sfx('fail');
+    setTimeout(()=>{ S.deposited=[]; renderAltar(); }, 1400);
+  }
+}
+
+document.getElementById('btn-play-melody').addEventListener('click', () => {
+  playMelody(LEVELS[S.level].melody);
+});
+document.getElementById('btn-clear').addEventListener('click', () => {
+  S.deposited=[]; renderAltar();
+});
+document.getElementById('btn-close').addEventListener('click', closeAltar);
+
+// ── LEVEL SYSTEM ──
+function startLevel(lvl) {
+  S.level=lvl; S.collected=[]; S.deposited=[];
+  P.x=2.5; P.y=1.7; P.z=2.5; P.velY=0;
+
+  generateWorld(lvl);
+  const level=LEVELS[lvl];
+  document.getElementById('level-display').textContent=`NIVEL ${lvl+1}: ${level.name}`;
+  document.getElementById('objective').textContent=`Encuentra ${level.melody.length} notas y llévalas al Altar`;
+  updateInventoryUI();
+
+  const lt=document.getElementById('level-transition');
+  document.getElementById('lt-title').textContent=`NIVEL ${lvl+1}: ${level.name}`;
+  document.getElementById('lt-desc').textContent=level.desc;
+  const prev=document.getElementById('lt-preview');
+  prev.innerHTML='';
+  level.melody.forEach(n=>{
+    const c=document.createElement('div');
+    c.className='note-chip'; c.style.background=NOTE_COLORS[n]; c.textContent=n;
+    prev.appendChild(c);
+  });
+  lt.classList.add('active');
+  setTimeout(()=>playMelody(level.melody), 600);
+  setTimeout(()=>{
+    lt.classList.remove('active');
+    if (!document.pointerLockElement) renderer.domElement.requestPointerLock();
+  }, 3800);
+}
+
+function nextLevel() {
+  if (S.level+1>=LEVELS.length) {
+    document.getElementById('win-screen').classList.add('active');
+    sfx('success');
+  } else {
+    startLevel(S.level+1);
+  }
+}
+
+// ── GAME LOOP ──
+let frame=0;
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+  if (!S.started) { renderer.render(scene,cam); return; }
+
+  // ── Movement ──
+  if (!S.altarOpen && document.pointerLockElement) {
+    const fw={x:-Math.sin(P.yaw), z:-Math.cos(P.yaw)};
+    const rt={x: Math.cos(P.yaw), z:-Math.sin(P.yaw)};
+    let dx=0,dz=0;
+    if(KEYS['KeyW']){dx+=fw.x*PLAYER_SPEED;dz+=fw.z*PLAYER_SPEED;}
+    if(KEYS['KeyS']){dx-=fw.x*PLAYER_SPEED;dz-=fw.z*PLAYER_SPEED;}
+    if(KEYS['KeyA']){dx-=rt.x*PLAYER_SPEED;dz-=rt.z*PLAYER_SPEED;}
+    if(KEYS['KeyD']){dx+=rt.x*PLAYER_SPEED;dz+=rt.z*PLAYER_SPEED;}
+    if(dx||dz) movePlayer(dx,dz);
+
+    // Gravity
+    P.velY -= .0065;
+    const ny=P.y+P.velY;
+    const fy=ny-1.62;
+    if(hasBlock(P.x-M,fy,P.z-M)||hasBlock(P.x+M,fy,P.z-M)||hasBlock(P.x-M,fy,P.z+M)||hasBlock(P.x+M,fy,P.z+M)){
+      P.velY=0; P.onGround=true;
+      P.y=Math.floor(P.y-1.6)+1+1.61;
+    } else {
+      P.y=ny; P.onGround=false;
+    }
+    // Head bump
+    const hy=P.y+.15;
+    if(hasBlock(P.x-M,hy,P.z-M)||hasBlock(P.x+M,hy,P.z-M)||hasBlock(P.x-M,hy,P.z+M)||hasBlock(P.x+M,hy,P.z+M))
+      P.velY=Math.min(P.velY,-.01);
+    // Fall death recovery
+    if(P.y<-6){P.x=2.5;P.y=4;P.z=2.5;P.velY=0;notify('¡Cuidado con el vacío!');}
+  }
+  updateCam();
+
+  // ── Block interaction ──
+  if (!S.altarOpen) {
+    const hit=getHit();
+    if(hit){
+      const pos=hit.object.position;
+      hlMesh.position.copy(pos); hlMesh.visible=true;
+      const bx=Math.floor(pos.x),by=Math.floor(pos.y),bz=Math.floor(pos.z);
+      const key=`${bx},${by},${bz}`;
+      const data=blockData[key];
+      if(mouseHeld && data?.breakable){
+        if(breakKey!==key){breakKey=key;breakTimer=0;}
+        breakTimer++;
+        const pct=breakTimer/BREAK_FRAMES*100;
+        document.getElementById('break-wrap').style.display='flex';
+        document.getElementById('break-bar').style.width=pct+'%';
+        if(breakTimer>=BREAK_FRAMES){
+          sfx('break');
+          const hasN=data.hasNote, noteV=data.noteValue;
+          removeBlock(bx,by,bz);
+          if(hasN&&noteV) spawnNote(bx,by+1,bz,noteV);
+          breakKey=null; breakTimer=0; hideBreakBar();
+        }
+      } else if(!mouseHeld){
+        breakKey=null; breakTimer=0; hideBreakBar();
+      }
+    } else {
+      hlMesh.visible=false;
+      if(!mouseHeld){breakKey=null;breakTimer=0;hideBreakBar();}
+    }
+
+    // ── Collect floating notes ──
+    for(let i=worldNotes.length-1;i>=0;i--){
+      const wn=worldNotes[i];
+      wn.mesh.position.y=wn.wy+Math.sin(frame*.055+wn.phase)*.15;
+      wn.mesh.rotation.y=frame*.035;
+      const d=Math.hypot(P.x-wn.wx,P.z-wn.wz);
+      if(d<1.25&&Math.abs(P.y-wn.wy)<1.6){
+        sfx('collect'); playNote(wn.noteValue,.4,.35);
+        notify(`¡Nota ${wn.noteValue} recolectada! ${NOTE_EMOJIS[wn.noteValue]}`);
+        S.collected.push(wn.noteValue);
+        scene.remove(wn.mesh);
+        wn.mesh.geometry.dispose(); wn.mesh.material.dispose();
+        worldNotes.splice(i,1);
+        updateInventoryUI();
+        const lv=LEVELS[S.level];
+        if(S.collected.length>=lv.melody.length)
+          document.getElementById('objective').textContent='¡Ve al Altar y deposita las notas! [ E ]';
+      }
+    }
+
+    // ── Altar proximity ──
+    const ad=Math.hypot(P.x-ALTAR_X-.5,P.z-ALTAR_Z-.5);
+    document.getElementById('interact-prompt').style.display=ad<4.5?'block':'none';
+
+    // Beacon animation
+    if(beaconMesh){
+      beaconMesh.rotation.y=frame*.025;
+      beaconMesh.material.emissiveIntensity=.7+Math.sin(frame*.06)*.3;
+    }
+  }
+
+  renderer.render(scene,cam);
+}
+
+// ── INIT ──
+function init() {
+  buildAltar(ALTAR_X, ALTAR_Z);
+
+  document.getElementById('start-btn').addEventListener('click', ()=>{
+    initAudio();
+    document.getElementById('start-screen').style.display='none';
+    S.started=true;
+    startLevel(0);
+    renderer.domElement.requestPointerLock();
+  });
+
+  window.addEventListener('resize', ()=>{
+    cam.aspect=innerWidth/innerHeight;
+    cam.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+  });
+
+  updateCam();
+  loop();
+}
+
+init();
+</script>
+</body>
+</html>
